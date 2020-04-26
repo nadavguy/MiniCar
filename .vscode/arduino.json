@@ -1,5 +1,5 @@
 {
     "board": "arduino:avr:leonardo",
-    "port": "COM4",
+    "port": "COM11",
     "sketch": "MiniCar\\MiniCar.ino"
 }

@@ -2,8 +2,8 @@
 #include "kalman1.cpp"
 
 #define Forward 90
-#define Left 45
-#define Right 135
+#define Left 135
+#define Right 45
 
 int MotorPWMPin = 2;
 int ServoPWMPin = 3;
@@ -37,16 +37,16 @@ Kalman GreenSF02_KF(process_noise, sensor_noise, estimated_error, initial_value)
 void setup() 
 {
   // put your setup code here, to run once:
-  Wire.begin();
+  //Wire.begin();
   Serial.begin(9600);
   pinMode(MotorPWMPin,OUTPUT);
   pinMode(ServoPWMPin,OUTPUT);
-  for (int i =0 ; i < 5 ; i++)
-  {
-    // Distance = ReadDistance();
-    // AveragedDistance = ArrayAverage(DistanceArray,Distance);
-    ReadDistance(GreenSF02);
-  }
+  // for (int i =0 ; i < 5 ; i++)
+  // {
+  //   // Distance = ReadDistance();
+  //   // AveragedDistance = ArrayAverage(DistanceArray,Distance);
+  //   ReadDistance(GreenSF02);
+  // }
 
   TwentyMilisecondCycle = micros();
 }
@@ -55,12 +55,13 @@ void loop()
 {
   // put your main code here, to run repeatedly:
   TimeInSeconds = micros() / 1000000.0 ;
+  //Serial.println(TimeInSeconds);
   if (micros() - TwentyMilisecondCycle > 20000)
   {
     TwentyMilisecondCycle = micros();
   }
 
-  if (micros() <= TwentyMilisecondCycle)
+  if (micros() < TwentyMilisecondCycle)
   {
     TwentyMilisecondCycle = micros();
     IsCounterOverProtection = true;
@@ -72,10 +73,10 @@ void loop()
     IsCounterOverProtection = false;
     Serial.println("Counter OverProtection enabled.~"); // for testing DO NOT REMOVE
   }
-
-  //Take Code from SRF02 Demo for reading without delay
-  // Distance = ReadDistance();
-  // AveragedDistance = ArrayAverage(DistanceArray,Distance);
+  // SetServoAngle(Right,false);
+  Take Code from SRF02 Demo for reading without delay
+  Distance = ReadDistance();
+  AveragedDistance = ArrayAverage(DistanceArray,Distance);
   ReadDistance(GreenSF02);
 
   if (AveragedDistance < 100)
@@ -177,8 +178,8 @@ void SetServoAngle(int AngleToSet, bool StaticCourse)
   //Forward - 90 degrees 1.5mSec
   //Right - 135 degrees 2mSec
   int PWMValue = 1000 * ( (2-1) * (double)AngleToSet/(135.0-45.0) + 0.5 );
-  Serial.print("PWMValue: ");
-  Serial.println(PWMValue);
+  // Serial.print("PWMValue: ");
+  // Serial.println(PWMValue);
   if (micros() - TwentyMilisecondCycle < PWMValue) // 20000 / 100 * Value
   {
     digitalWrite(ServoPWMPin, HIGH);
