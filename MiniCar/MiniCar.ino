@@ -7,6 +7,7 @@
 
 int MotorPWMPin = 2;
 int ServoPWMPin = 3;
+
 int ArrayCounter = 0;
 int reading = 15;
 
@@ -39,14 +40,13 @@ void setup()
   Wire.begin();
   Serial.begin(9600);
   pinMode(MotorPWMPin,OUTPUT);
-
+  pinMode(ServoPWMPin,OUTPUT);
   for (int i =0 ; i < 5 ; i++)
   {
     // Distance = ReadDistance();
     // AveragedDistance = ArrayAverage(DistanceArray,Distance);
     ReadDistance(GreenSF02);
   }
-
 
   TwentyMilisecondCycle = micros();
 }
