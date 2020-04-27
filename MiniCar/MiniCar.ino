@@ -5,11 +5,13 @@
 #define Left 135
 #define Right 45
 
-int MotorPWMPin = 2;
-int ServoPWMPin = 3;
+int MotorPWMPin = 5;
+int ServoPWMPin = 6;
 
 int ArrayCounter = 0;
 int reading = 15;
+
+int TestCounter = 0;
 
 unsigned long PreviousTimer = 0;
 unsigned long TwentyMilisecondCycle = 0;
@@ -26,27 +28,36 @@ float SelectedAngle = 90;
 bool IsLockedCourse = false;
 bool IsCounterOverProtection = false;
 bool IsDistanceMeasurementCompleted = true;
+bool DistanceCheckInitiated  = false;
+bool IsLeftTestFinished = false;
+bool IsRightTestFinished = false;
+bool IsTurnFinished = false;
 
 byte GreenSF02 = 112;
 
 double FilteredRange = 0;
 double TimeInSeconds = 0;
 
+double DistanceLeft = 0;
+double DistanceRight = 0;
+
 Kalman GreenSF02_KF(process_noise, sensor_noise, estimated_error, initial_value);
 
 void setup() 
 {
   // put your setup code here, to run once:
-  //Wire.begin();
+  Wire.begin();
   Serial.begin(9600);
   pinMode(MotorPWMPin,OUTPUT);
   pinMode(ServoPWMPin,OUTPUT);
-  // for (int i =0 ; i < 5 ; i++)
-  // {
-  //   // Distance = ReadDistance();
-  //   // AveragedDistance = ArrayAverage(DistanceArray,Distance);
-  //   ReadDistance(GreenSF02);
-  // }
+  for (int i =0 ; i < 5 ; i++)
+  {
+    // Distance = ReadDistance();
+    // AveragedDistance = ArrayAverage(DistanceArray,Distance);
+    ReadDistance(GreenSF02);
+    delay(75); 
+    ReadDistance(GreenSF02);
+  }
 
   TwentyMilisecondCycle = micros();
 }
@@ -74,62 +85,20 @@ void loop()
     Serial.println("Counter OverProtection enabled.~"); // for testing DO NOT REMOVE
   }
   // SetServoAngle(Right,false);
-  Take Code from SRF02 Demo for reading without delay
-  Distance = ReadDistance();
-  AveragedDistance = ArrayAverage(DistanceArray,Distance);
+  // Take Code from SRF02 Demo for reading without delay
+  // Distance = ReadDistance();
+  // AveragedDistance = ArrayAverage(DistanceArray,Distance);
   ReadDistance(GreenSF02);
 
-  if (AveragedDistance < 100)
+  if ( (AveragedDistance < 100) && (!DistanceCheckInitiated) )
   {
-    if (!IsLockedCourse)
-    {
-      PWMSignal(MotorPWMPin, 0);
-      //Check Next Course
-      //Check Distance left
-      SetServoAngle(Left, false);
-      for (int i = 0; i < 5; i++)
-      {
-        ReadDistance(GreenSF02);
-      }
-      double DistanceLeft = AveragedDistance;
-      //Check Distance right
-      SetServoAngle(Right, false);
-      for (int i = 0; i < 5; i++)
-      {
-        ReadDistance(GreenSF02);
-      }
-      double DistanceRight = AveragedDistance;
-
-      if (DistanceLeft < DistanceRight)
-      {
-        SelectedAngle = Right;
-      }
-      else
-      {
-        SelectedAngle = Left;
-      }
-      FixedCourseTime = micros();
-      IsLockedCourse = true;
-    }
-
-    // if (!IsLockedCourse)
-    // {
-    //   FixedCourseTime = micros();
-    //   IsLockedCourse = true;
-    // }
-
-    //Move in selected direction for 0.5 second
-    if (micros() - FixedCourseTime < 500000)
-    {
-      PWMSignal(MotorPWMPin, 25);
-      SetServoAngle(SelectedAngle, IsLockedCourse);
-    }
-    else
-    {
-      IsLockedCourse = false;
-    }
+    DistanceCheckInitiated = true;
   }
-  else //Move Forward
+  else if ( (AveragedDistance < 100) && (DistanceCheckInitiated) )
+  {
+    TestCourse();
+  }
+  else if (AveragedDistance >= 100)
   {
     PWMSignal(MotorPWMPin, 75);
     SetServoAngle(Forward, IsLockedCourse);
@@ -242,3 +211,75 @@ void ReadDistance(byte Address)
     IsDistanceMeasurementCompleted = true;
   }
 }
+
+void TestCourse()
+{
+  if (!IsLockedCourse)
+  {
+    IsTurnFinished = false;
+    PWMSignal(MotorPWMPin, 0);
+    //Check Next Course
+    //Check Distance left
+    if (!IsLeftTestFinished)
+    {
+      SetServoAngle(Left, false);
+      ReadDistance(GreenSF02);
+      if (IsDistanceMeasurementCompleted)
+      {
+        TestCounter++;
+      }
+      if (TestCounter>=5)
+      {
+        DistanceLeft = AveragedDistance;
+        IsLeftTestFinished = true;
+        TestCounter = 0;
+      }
+    }
+    
+    //Check Distance right
+    else if ( (IsLeftTestFinished) && (!IsRightTestFinished) )
+    {
+      SetServoAngle(Right, false);
+      ReadDistance(GreenSF02);
+      if (IsDistanceMeasurementCompleted)
+      {
+        TestCounter++;
+      }
+      if (TestCounter>=5)
+      {
+        DistanceRight = AveragedDistance;
+        IsRightTestFinished = true;
+        TestCounter = 0;
+      }
+    }
+
+    else if ((IsLeftTestFinished) && (IsRightTestFinished))
+    {
+      if (DistanceLeft < DistanceRight)
+      {
+        SelectedAngle = Right;
+      }
+      else
+      {
+        SelectedAngle = Left;
+      }
+      FixedCourseTime = micros();
+      IsLockedCourse = true;
+    }
+  }
+
+  //Move in selected direction for 0.5 second
+  if ( (micros() - FixedCourseTime < 500000) && (IsLockedCourse) && (!IsTurnFinished) )
+  {
+    PWMSignal(MotorPWMPin, 25);
+    SetServoAngle(SelectedAngle, IsLockedCourse);
+  }
+  else
+  {
+    IsLockedCourse = false;
+    IsLeftTestFinished = false;
+    IsRightTestFinished = false;
+    IsTurnFinished = true;
+  }
+}
+
