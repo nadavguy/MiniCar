@@ -1,5 +1,7 @@
 #include <Wire.h>
 #include "kalman1.cpp"
+#include "PIDControl.h"
+#include "MPU9250.h"
 
 #define Forward 90
 #define Left 150
@@ -11,14 +13,19 @@ int ServoPWMPin = 6;
 int ArrayCounter = 0;
 int SelectedPower = 0;
 int SelectedAngle = 90;
+int SpeedCounter = 0;
 
 bool IsCounterOverProtection = false;
 bool CanRead = false;
+bool MagWasInMax = false;
+bool MagWasInMin = false;
 
 unsigned long PreviousTimer = 0;
 unsigned long TwentyMilisecondCycle = 0;
 unsigned long FixedCourseTime = 0;
 unsigned long LastReceivedMessageTimer = 0;
+unsigned long PreviousSensorReadCycle = 0; // in micro seconds
+unsigned long PreviousPIDCycle = 0; // in micro seconds
 
 double TimeInSeconds = 0;
 double ArraySum = 0;
@@ -29,6 +36,13 @@ String TempSTR = "";
 
 char terminator = '~';
 
+float ax = 0, ay = 0, az = 0;
+float mx = 0, my = 0, mz = 0;
+float gx = 0, gy = 0, gz = 0;
+
+MPU9250 IMU(Wire, 0x68);
+int status;
+
 void setup()
 {
   // put your setup code here, to run once:
@@ -37,6 +51,23 @@ void setup()
   Serial1.setTimeout(1);
   pinMode(MotorPWMPin, OUTPUT);
   pinMode(ServoPWMPin, OUTPUT);
+  status = IMU.begin();
+      Serial.print("Status: ");
+    Serial.println(status);
+  if (status < 0)
+  {
+    Serial.println("IMU initialization unsuccessful");
+    Serial.println("Check IMU wiring or try cycling power");
+    Serial.print("Status: ");
+    Serial.println(status);
+    while (1)
+    {
+    }
+  }
+  IMU.setAccelRange(MPU9250::ACCEL_RANGE_2G);
+  IMU.setGyroRange(MPU9250::GYRO_RANGE_250DPS);
+  IMU.setDlpfBandwidth(MPU9250::DLPF_BANDWIDTH_92HZ);
+  IMU.setSrd(9);
   TwentyMilisecondCycle = micros();
 }
 
@@ -45,30 +76,81 @@ void loop()
   // put your main code here, to run repeatedly:
   TimeInSeconds = micros() / 1000000.0;
   //Serial.println(TimeInSeconds);
-  if (micros() - TwentyMilisecondCycle > 20000)
-  {
-    TwentyMilisecondCycle = micros();
-  }
 
   if (micros() < TwentyMilisecondCycle)
   {
     TwentyMilisecondCycle = micros();
     IsCounterOverProtection = true;
-    Serial.println("Counter OverProtection Last20mSecTimer.~");
+    // Serial.println("Counter OverProtection Last20mSecTimer.~");
   }
 
   if (IsCounterOverProtection)
   {
     IsCounterOverProtection = false;
-    Serial.println("Counter OverProtection enabled.~"); // for testing DO NOT REMOVE
+    // Serial.println("Counter OverProtection enabled.~"); // for testing DO NOT REMOVE
   }
-  // TempSTR = Serial1.readString();
-  // if (!TempSTR.equals(""))
-  // {
-  //   Serial.println(TempSTR);
-  //   ParseRFMessage(TempSTR);
-  //   TempSTR = "";
-  // }
+
+  if (micros() - TwentyMilisecondCycle >= 20000)
+  {
+    TwentyMilisecondCycle = micros();
+  } //PreviousSensorReadCycle
+
+  if (micros() - PreviousSensorReadCycle >= 10000) //50Hz
+  {
+    IMU.readSensor();
+    ReadMPUData();
+    // Magnet close
+    // 195.75, MagX: -858.40, MagY: -1916.38, MagZ: 3762.70
+    // Magnet far
+    // 179.51, MagX: -181.48, MagY: 1092.53, MagZ: -272.61
+    // Runs at 100Hz since counts Max & Min Magneto
+    if ( (mz > 3000) && (my < -1500) && (!MagWasInMax) )
+    {
+      SpeedCounter++;
+      MagWasInMax = true;
+      MagWasInMin = false;
+    }
+    else if ( (mz < 0) && (my > 850) && (MagWasInMax) )
+    {
+      SpeedCounter++;
+      MagWasInMax = false;
+      MagWasInMin = true;
+    }
+    PreviousSensorReadCycle = micros();
+  } 
+
+  if (micros() - PreviousPIDCycle >= 100000) // 10Hz
+  {
+    // Serial.print(TimeInSeconds);
+    CalcPIDStep(SpeedCounter);
+    SelectedPower = (int)map((int)PIDOutput, 0, 35, 0, 255);
+    // PIDThrottleOutput = (int)map((int)PIDOutput, -35, 35, -127, 127);
+    // ControlDualMotors(PIDThrottleOutput,0); //LeftRightValue
+        // Serial.print(", Roll: ");
+    // Serial.print(Roll);
+    // Serial.print(", Pitch: ");
+    // Serial.print(Pitch);
+    // // Serial.print(", Yaw: ");
+    // // Serial.print(Yaw);
+    // Serial.print(", dT: ");
+    // Serial.print(dT);
+    // Serial.print(", Error: ");
+    // Serial.print(Error);
+    // Serial.print(", Addetive: ");
+    // Serial.print(AddativeError);
+    // Serial.print(", Derivative: ");
+    // Serial.print(Derivative);
+    // Serial.print(", PIDOutput: ");
+    // Serial.print(PIDOutput);
+    // Serial.print(", PIDThrottleOutput: ");
+    // Serial.print(SelectedPower);
+    // Serial.print(", SpeedCounter: ");
+    // Serial.print(SpeedCounter);
+    // Serial.println("~");
+    SpeedCounter = 0;
+    PreviousPIDCycle = micros();
+  }
+
 
   PWMSignal(MotorPWMPin, SelectedPower);
   SetServoAngle(SelectedAngle);
@@ -115,11 +197,11 @@ void SetServoAngle(int AngleToSet)
   {
     digitalWrite(ServoPWMPin, HIGH);
   }
-  else
+  else if (micros() - TwentyMilisecondCycle <= 14000)
   {
     digitalWrite(ServoPWMPin, LOW);
     // LastReceivedMessageTimer = micros();
-      TextFromPort = Serial1.readStringUntil(terminator);
+    TextFromPort = Serial1.readStringUntil(terminator);
     if (!TextFromPort.equals("\r\n\n"))
     {
       // Serial.println(TextFromPort);
@@ -132,6 +214,12 @@ void SetServoAngle(int AngleToSet)
       //SendMEssageRF(GeneralMessageHeader,GeneralMessage);
     }
   }
+  else
+  {
+    /* code */
+    digitalWrite(ServoPWMPin, LOW);
+  }
+  
 }
 
 void ParseRFMessage(String MessageToParse)
@@ -161,6 +249,42 @@ void ParseRFMessage(String MessageToParse)
     // Serial.print("SelectedAngle: ");
     // Serial.println(SelectedAngle);
   }
+}
+
+void ReadMPUData()
+{
+
+  // Serial.print("Value: ");
+  // Serial.println(MInt);
+    // display the data
+    // dtostrf(IMU.getAccelX_mss(), 10, 7, AccX);
+    // dtostrf(IMU.getAccelY_mss(), 10, 7, AccY);
+    // dtostrf(IMU.getAccelZ_mss(), 10, 7, AccZ);
+    // dtostrf(IMU.getGyroX_rads(), 10, 7, GyroX);
+    // dtostrf(IMU.getGyroY_rads(), 10, 7, GyroY);
+    // dtostrf(IMU.getGyroZ_rads(), 10, 7, GyroZ);
+    // dtostrf(IMU.getMagX_uT(), 10, 7, MagX);
+    // dtostrf(IMU.getMagY_uT(), 10, 7, MagY);
+    // dtostrf(IMU.getMagZ_uT(), 10, 7, MagZ);
+
+  ax = IMU.getAccelX_mss();
+  ay = IMU.getAccelY_mss();
+  az = IMU.getAccelZ_mss();
+  gx = IMU.getGyroX_rads();
+  gy = IMU.getGyroY_rads();
+  gz = IMU.getGyroZ_rads();
+  mx = IMU.getMagX_uT();
+  my = IMU.getMagY_uT();
+  mz = IMU.getMagZ_uT();
+  PreviousSensorReadCycle = micros();
+
+  // Serial.print(TimeInSeconds);
+  // Serial.print(", MagX: ");
+  // Serial.print(mx);
+  // Serial.print(", MagY: ");
+  // Serial.print(my);
+  // Serial.print(", MagZ: ");
+  // Serial.println(mz);
 }
 
 // void serialEvent1()
